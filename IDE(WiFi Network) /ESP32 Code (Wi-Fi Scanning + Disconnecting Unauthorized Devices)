@@ -1,0 +1,77 @@
+#include <WiFi.h>
+#include <WiFiClient.h>
+#include <HTTPClient.h>
+#include <WebServer.h>
+
+const char* ssid = "YOUR_WIFI_SSID";  
+const char* password = "YOUR_WIFI_PASSWORD";  
+const char* server_url = "http://YOUR_SERVER_IP:5000/report";  // Flask Server
+
+WebServer server(80);  // Web server for receiving disconnect commands
+
+// Function to scan Wi-Fi and send data to the server
+void scanNetwork() {
+    Serial.println("Scanning network...");
+    WiFi.scanNetworks(true);
+    delay(5000);
+
+    int n = WiFi.scanComplete();
+    if (n > 0) {
+        String data = "[";
+        for (int i = 0; i < n; ++i) {
+            String mac = WiFi.BSSIDstr(i);
+            String ip = WiFi.localIP().toString();
+            data += "{\"mac\":\"" + mac + "\", \"ip\":\"" + ip + "\"}";
+            if (i < n - 1) data += ",";
+        }
+        data += "]";
+
+        Serial.println("Sending data to server...");
+        HTTPClient http;
+        http.begin(server_url);
+        http.addHeader("Content-Type", "application/json");
+        int httpResponseCode = http.POST(data);
+        Serial.println(httpResponseCode);
+        http.end();
+    }
+}
+
+// Function to disconnect a device (requires custom ESP32 firmware for full deauth)
+void disconnectDevice(String mac) {
+    Serial.print("Disconnecting: ");
+    Serial.println(mac);
+    // Code to send deauth packet (requires ESP32 custom firmware)
+}
+
+// Handle incoming HTTP request to disconnect a device
+void handleDisconnect() {
+    if (server.hasArg("mac")) {
+        String mac = server.arg("mac");
+        disconnectDevice(mac);
+        server.send(200, "text/plain", "Device Disconnected");
+    } else {
+        server.send(400, "text/plain", "MAC address required");
+    }
+}
+
+void setup() {
+    Serial.begin(115200);
+    WiFi.begin(ssid, password);
+
+    while (WiFi.status() != WL_CONNECTED) {
+        delay(1000);
+        Serial.println("Connecting to WiFi...");
+    }
+    Serial.println("Connected to WiFi");
+
+    WiFi.softAP("ESP32_IDS", "12345678");  // Create an access point for disconnect commands
+
+    server.on("/disconnect", handleDisconnect);
+    server.begin();
+}
+
+void loop() {
+    scanNetwork();
+    server.handleClient();  // Listen for disconnect commands
+    delay(60000);  // Scan every 1 minute
+}
