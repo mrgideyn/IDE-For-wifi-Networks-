@@ -1,0 +1,52 @@
+from flask import Flask, request, jsonify
+import sqlite3
+import requests
+import time
+
+app = Flask(__name__)
+
+TELEGRAM_BOT_TOKEN = "YOUR_TELEGRAM_BOT_TOKEN"
+CHAT_ID = "YOUR_CHAT_ID"
+
+# Initialize database
+def init_db():
+    conn = sqlite3.connect("devices.db")
+    cursor = conn.cursor()
+    cursor.execute("CREATE TABLE IF NOT EXISTS authorized_devices (mac TEXT PRIMARY KEY, owner TEXT)")
+    conn.commit()
+    conn.close()
+
+# Check if MAC address is authorized
+def is_authorized(mac):
+    conn = sqlite3.connect("devices.db")
+    cursor = conn.cursor()
+    cursor.execute("SELECT * FROM authorized_devices WHERE mac=?", (mac,))
+    result = cursor.fetchone()
+    conn.close()
+    return result is not None
+
+# Send Telegram Alert
+def send_telegram_alert(mac, ip):
+    message = f"🚨 Unauthorized Device Detected!\nMAC: {mac}\nIP: {ip}\n\nReply with /approve {mac} or /disconnect {mac}"
+    url = f"https://api.telegram.org/bot{TELEGRAM_BOT_TOKEN}/sendMessage?chat_id={CHAT_ID}&text={message}"
+    requests.get(url)
+
+# Handle data from ESP32
+@app.route("/report", methods=["POST"])
+def report():
+    data = request.get_json()
+    unauthorized_devices = []
+    
+    for device in data:
+        mac = device["mac"]
+        ip = device["ip"]
+        
+        if not is_authorized(mac):
+            unauthorized_devices.append(mac)
+            send_telegram_alert(mac, ip)
+    
+    return jsonify({"status": "ok", "unauthorized": unauthorized_devices})
+
+if __name__ == "__main__":
+    init_db()
+    app.run(host="0.0.0.0", port=5000, debug=True)
